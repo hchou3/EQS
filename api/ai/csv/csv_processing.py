@@ -2,7 +2,9 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import pdfplumber
-from ...ai.pretraining_tools.prompt import create_prompt, llm_call, parse_llm_response
+from ...ai.pretraining_tools.prompt import create_csv_prompt
+from ...ai.pretraining_tools.pretraining import parse_llm_response, llm_call
+from ...ai.csv.classes import _to_json_safe
 
 SENSITIVE_ATTRIBUTES = {
     'demographic': ['race', 'ethnicity', 'gender', 'sex', 'age', 'age_group'],
@@ -111,7 +113,7 @@ async def analyze_dataframe(
         regression_favorable_directions.
     """
     dataset_info = await _prepare_dataset_info(df, sample_size)
-    prompt = create_prompt(dataset_info)
+    prompt = create_csv_prompt(dataset_info)
     response = await llm_call(prompt, api_key, model)
     return parse_llm_response(response)
 
@@ -356,16 +358,3 @@ class CSVData:
         return _to_json_safe(report)
 
 
-def _to_json_safe(obj):
-    """Convert numpy/scipy types to native Python for JSON serialization."""
-    if isinstance(obj, (np.integer, np.int64, np.int32)):
-        return int(obj)
-    if isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, dict):
-        return {k: _to_json_safe(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_to_json_safe(x) for x in obj]
-    return obj

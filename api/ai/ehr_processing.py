@@ -3,30 +3,6 @@ import spacy
 from typing import List, Dict, Tuple
 from ehr_labels import  legitimate_context_patterns, discourse_marker_patterns, specificity_patterns, bias_indicator_patterns, race_ethnicity_patterns, socioeconomic_patterns, age_patterns, generalizing_patterns, deficit_patterns
 
-def create_bias_detection_ruler(model_name):
-    """Create spaCy pipeline with all pattern matching rules."""
-    nlp = spacy.load("en_core_web_sm")
-    if "entity_ruler" in nlp.pipe_names:
-        nlp.remove_pipe("entity_ruler")
-
-    ruler = nlp.add_pipe("entity_ruler", before="ner")
-
-    all_patterns = (
-        legitimate_context_patterns +
-        discourse_marker_patterns +
-        specificity_patterns +
-        bias_indicator_patterns +
-        race_ethnicity_patterns +
-        socioeconomic_patterns +
-        age_patterns +
-        generalizing_patterns +
-        deficit_patterns
-    )
-
-    ruler.add_patterns(all_patterns)
-
-    return nlp
-
 def check_dependency_relationship(demographic_ent: Span, problematic_ent: Span) -> Tuple[bool, float]:
     """
     Check if demographic is the grammatical subject of problematic language.

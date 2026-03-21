@@ -2,7 +2,6 @@ import asyncio
 import json
 from google import genai
 
-from .prompt import create_csv_prompt
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
