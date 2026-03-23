@@ -1,6 +1,7 @@
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Literal
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Types
@@ -64,3 +65,46 @@ class FairlearnDataset:
             if b.protected_attr == protected_attr and b.target_col == target_col:
                 return b
         return None
+
+@dataclass
+class ShapResult:
+    """
+    Stores SHAP outputs for one (protected_attr, target_col) bundle.
+ 
+    Attributes
+    ----------
+    protected_attr:
+        The protected attribute this result corresponds to (mirrors the bundle).
+    target_col:
+        The target column this result corresponds to (mirrors the bundle).
+    global_importances : pd.Series
+        Mean absolute SHAP value per feature, sorted descending. Use this as
+        your primary feature importance — it is more reliable than the native
+        importance from XGBoost/LightGBM because it accounts for interaction
+        effects and is consistent across model types.
+    per_group_importances : dict[str, pd.Series]
+        Mapping of group label → mean absolute SHAP value per feature for rows
+        belonging to that group. Compare across groups to surface proxy features
+        whose influence is concentrated in one demographic subgroup.
+    shap_values : np.ndarray or None
+        Full (n_samples, n_features) SHAP value matrix. None if
+        store_shap_matrix=False was passed to compute_shap(). Needed for
+        waterfall plots, force plots, and individual-level explanation.
+    feature_names : list[str]
+        Ordered list of feature names corresponding to columns in shap_values.
+    n_samples : int
+        Number of rows the SHAP model was trained and explained on.
+    refit_model:
+        The full-data refitted estimator used for SHAP computation. Stored so
+        callers can run additional explanations (e.g. dependence plots) without
+        refitting. Not the same model as the CV model used for MetricFrame.
+    """
+ 
+    protected_attr: str
+    target_col: str
+    global_importances: pd.Series
+    per_group_importances: dict[str, pd.Series]
+    feature_names: list[str]
+    n_samples: int
+    refit_model: object
+    shap_values: np.ndarray | None = None

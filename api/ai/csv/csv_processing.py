@@ -5,6 +5,7 @@ import pdfplumber
 from ...ai.pretraining_tools.prompt import create_csv_prompt
 from ...ai.pretraining_tools.pretraining import parse_llm_response, llm_call
 from ...ai.csv.classes import _to_json_safe
+import warnings
 
 SENSITIVE_ATTRIBUTES = {
     'demographic': ['race', 'ethnicity', 'gender', 'sex', 'age', 'age_group'],
@@ -13,6 +14,73 @@ SENSITIVE_ATTRIBUTES = {
     'other_protected': ['veteran_status', 'marital_status', 'religion']
 
 }
+
+def encode_features(
+    self,
+    drop_first: bool = False,
+) -> None:
+    """
+    One-hot encode all feature columns in the working DataFrame, leaving
+    protected attributes and target columns in their original form.
+ 
+    Must be called AFTER identify_columns() so that protected_attributes
+    and target_columns are known. The encoded DataFrame replaces self._df
+    in-place so all downstream steps (prepare_fairlearn_data, train_bundle,
+    compute_shap) read from a uniform, fully-encoded feature space.
+    """
+    if self.protected_attributes is None or self.target_columns is None:
+        raise RuntimeError(
+            "encode_features() must be called after identify_columns(). "
+            "protected_attributes and target_columns are not set yet."
+        )
+ 
+    # Always start from raw_data to prevent double-encoding if called again
+    df = self.raw_data.copy()
+ 
+    # Columns that must remain unencoded
+    skip_cols = (
+        set(self.protected_attributes or [])
+        | set(self.target_columns or [])
+    )
+ 
+    feature_cols = [c for c in df.columns if c not in skip_cols]
+    preserved_cols = [c for c in df.columns if c in skip_cols]
+ 
+    if not feature_cols:
+        warnings.warn(
+            "No feature columns remain after excluding protected attributes "
+            "and target columns. encode_features() has nothing to encode.",
+            UserWarning,
+            stacklevel=2,
+        )
+        self.original_feature_cols = []
+        self.encoded_feature_cols = []
+        return
+ 
+    self.original_feature_cols = feature_cols
+ 
+    # --- Encode ---
+    X_raw = df[feature_cols]
+    X_encoded = pd.get_dummies(X_raw, drop_first=drop_first)
+ 
+    # Cast bool → int for XGBoost / LightGBM compatibility
+    bool_cols = X_encoded.select_dtypes(include="bool").columns
+    if len(bool_cols):
+        X_encoded[bool_cols] = X_encoded[bool_cols].astype(int)
+ 
+    self.encoded_feature_cols = list(X_encoded.columns)
+ 
+    # Reconstruct working DataFrame: encoded features + preserved cols
+    self._df = pd.concat([X_encoded, df[preserved_cols]], axis=1)
+ 
+    n_orig = len(feature_cols)
+    n_enc = len(self.encoded_feature_cols)
+    print(
+        f"encode_features(): {n_orig} feature columns → {n_enc} encoded columns "
+        f"(+{n_enc - n_orig} from categorical expansion). "
+        f"{len(preserved_cols)} columns preserved unencoded "
+        f"({', '.join(preserved_cols)})."
+    )
 
 async def prepare_df(data):
     file_path = data if isinstance(data, str) else getattr(data, 'name', '')
