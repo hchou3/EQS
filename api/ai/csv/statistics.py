@@ -3,6 +3,7 @@ from csv_training import INTERSECTIONAL_SKIP_THRESHOLD, MIN_GROUP_SAMPLES
 import warnings
 from classes import FairlearnBundle, ShapResult
 import numpy as np
+import sklearn.base as skbase
  
 # ---------------------------------------------------------------------------
 # SHAP computation
@@ -28,30 +29,6 @@ def compute_shap(
     - Representational bias: the last CV fold's model was only trained on
       ~80% of rows. For SHAP, a model trained on the full dataset produces
       more stable and representative attribution values.
- 
-    Returns
-    -------
-    ShapResult
-        Contains global_importances, per_group_importances, and optionally
-        the full shap_values matrix.
- 
-    Raises
-    ------
-    ImportError
-        If the shap package is not installed.
-    ValueError
-        If bundle.skipped is True, or if X index does not align with
-        bundle.y_true.index.
- 
-    Example
-    -------
-    >>> dataset = prepare_fairlearn_data(csv_data, mode="individual")
-    >>> bundle = dataset.get_bundle("race", "readmitted")
-    >>> estimator = build_estimator(bundle.task_type, n_samples=len(bundle.y_true))
-    >>> X = csv_data.df[csv_data.encoded_feature_cols]
-    >>> shap_result = compute_shap(bundle, estimator, X)
-    >>> print(shap_result.global_importances.head(10))
-    >>> print(shap_result.per_group_importances["Black"].head(10))
     """
     try:
         import shap as shap_lib
@@ -60,8 +37,6 @@ def compute_shap(
             "shap is required for compute_shap(). "
             "Install it with: pip install shap"
         )
- 
-    import sklearn.base as skbase
  
     if bundle.skipped:
         raise ValueError(
@@ -125,15 +100,22 @@ def compute_shap(
         )
  
     # ------------------------------------------------------------------
-    # 3. Full-data refit — separate model purely for explanation
+    # 3. Full-data refit — separate model purely for explanation.
+    #    Critically, this uses X_full / y_full (the full common_idx data)
+    #    NOT the downsampled X_aligned / y_aligned. The refit model must
+    #    see the full distribution so SHAP values reflect all groups
+    #    equally. SHAP computation itself runs on the (smaller) sample.
     # ------------------------------------------------------------------
+    X_full = X.loc[common_idx]
+    y_full = bundle.y_true.loc[common_idx]
+ 
     refit_model = skbase.clone(estimator)
-    refit_model.fit(X_aligned, y_aligned)
+    refit_model.fit(X_full, y_full)
  
     # ------------------------------------------------------------------
-    # 4. Compute SHAP values using TreeExplainer
-    #    TreeExplainer is exact for tree-based models (XGBoost, LightGBM,
-    #    RandomForest) and orders of magnitude faster than KernelExplainer.
+    # 4. Compute SHAP values using TreeExplainer on the sample.
+    #    TreeExplainer is exact for tree-based models (XGBoost, LightGBM)
+    #    and orders of magnitude faster than KernelExplainer.
     # ------------------------------------------------------------------
     explainer = shap_lib.TreeExplainer(refit_model)
     raw_shap = explainer.shap_values(X_aligned)
@@ -201,6 +183,26 @@ def compare_shap_across_groups(
     importance but high importance in a specific subgroup indicate the model
     is treating that group differently, often via a proxy variable.
  
+    Parameters
+    ----------
+    shap_result:
+        Output of compute_shap().
+    top_n:
+        Number of top features to include (ranked by global importance).
+ 
+    Returns
+    -------
+    pd.DataFrame
+        Rows = top_n features (by global importance).
+        Columns = groups + "global".
+        Values = mean absolute SHAP value.
+        Sorted by global importance descending.
+ 
+    Example
+    -------
+    >>> df_comparison = compare_shap_across_groups(shap_result, top_n=15)
+    >>> print(df_comparison)
+    >>> # High value in one group column but low "global" = proxy signal
     """
     top_features = shap_result.global_importances.head(top_n).index.tolist()
  

@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from scipy import stats
-import pdfplumber
 from ...ai.pretraining_tools.prompt import create_csv_prompt
 from ...ai.pretraining_tools.pretraining import parse_llm_response, llm_call
 from ...ai.csv.classes import _to_json_safe
@@ -28,10 +27,13 @@ def encode_features(
     in-place so all downstream steps (prepare_fairlearn_data, train_bundle,
     compute_shap) read from a uniform, fully-encoded feature space.
     """
-    if self.protected_attributes is None or self.target_columns is None:
+    if not self.protected_attributes or not self.target_columns:
         raise RuntimeError(
             "encode_features() must be called after identify_columns(). "
-            "protected_attributes and target_columns are not set yet."
+            "protected_attributes and target_columns must be non-empty — "
+            "they are currently "
+            f"{self.protected_attributes!r} and {self.target_columns!r}. "
+            "identify_columns() may not have returned valid results."
         )
  
     # Always start from raw_data to prevent double-encoding if called again
@@ -81,26 +83,6 @@ def encode_features(
         f"{len(preserved_cols)} columns preserved unencoded "
         f"({', '.join(preserved_cols)})."
     )
-
-async def prepare_df(data):
-    file_path = data if isinstance(data, str) else getattr(data, 'name', '')
-
-    if file_path.lower().endswith('.csv'):
-        df = pd.read_csv(data)
-    elif file_path.lower().endswith('.pdf'):
-        all_tables = []
-        with pdfplumber.open(data) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables or []:
-                    if table:
-                        df_page = pd.DataFrame(table[1:], columns=table[0])
-                        all_tables.append(df_page)
-        df = pd.concat(all_tables, ignore_index=True) if all_tables else pd.DataFrame()
-    else:
-        raise ValueError(f"Unsupported file type. Expected .csv or .pdf, got: {file_path or type(data).__name__}")
-
-    return df
 
 async def _prepare_dataset_info(df, sample_size):
         """

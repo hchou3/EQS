@@ -2,7 +2,7 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Literal
 import numpy as np
-
+from fairlearn.metrics import MetricFrame
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -108,3 +108,40 @@ class ShapResult:
     n_samples: int
     refit_model: object
     shap_values: np.ndarray | None = None
+
+
+@dataclass
+class BundleResult:
+    """
+    All outputs from training one (protected_attr, target_col) bundle.
+ 
+    Separates CV-based evaluation outputs (used for fairness metrics) from
+    the full-data refit model (used exclusively for SHAP). The two models
+    are intentionally kept apart — mixing them would either leak training
+    data into performance metrics or produce SHAP values from an
+    underrepresented model.
+ 
+    Attributes
+    ----------
+    bundle:
+        Reference back to the source FairlearnBundle for provenance.
+    y_pred_oof : pd.Series
+        Out-of-fold predictions aligned to bundle.y_true.index. Every row
+        was predicted on held-out data, making these unbiased estimates
+        suitable for MetricFrame and fairness metric computation.
+    metric_frame : MetricFrame
+        Fairlearn MetricFrame computed from y_pred_oof vs bundle.y_true,
+        broken down by bundle.sensitive_features.
+    cv_model:
+        The estimator fitted on the last CV fold. Retained for inspection
+        but NOT used for SHAP — see refit_model on ShapResult instead.
+    n_folds : int
+        Number of CV folds actually used (may be less than CV_N_SPLITS if
+        a class had too few samples for full stratification).
+    """
+ 
+    bundle: FairlearnBundle
+    y_pred_oof: pd.Series
+    metric_frame: MetricFrame
+    cv_model: object
+    n_folds: int

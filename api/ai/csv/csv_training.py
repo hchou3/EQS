@@ -13,11 +13,37 @@ from sklearn.metrics import (
 from csv_processing import CSVData
 from __future__ import annotations
 import warnings
-from classes import SparseGroupWarning, FairlearnBundle, FairlearnDataset, SensitivityMode
+from classes import SparseGroupWarning, FairlearnBundle, FairlearnDataset, SensitivityMode, BundleResult
+from lightgbm import LGBMClassifier, LGBMRegressor
+from sklearn.model_selection import KFold, StratifiedKFold
+import sklearn.base as skbase
  
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+LGBM_BASE_PARAMS = {
+    "n_estimators": 300,
+    "num_leaves": 31,
+    "max_depth": -1,    
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,      # L1 — sparse feature selection
+    "reg_lambda": 1.0,     # L2 — weight regularisation
+    "n_jobs": -1,
+    "random_state": 42,
+    "verbose": -1,      
+}
+ 
+# Number of cross-validation folds for train_bundle()
+CV_N_SPLITS = 5
+ 
+# Minimum rows per leaf — adaptive floor based on dataset size.
+# Prevents overfitting to small demographic subgroups.
+# Computed as max(20, 0.5% of dataset) inside train_bundle().
+CV_MIN_CHILD_SAMPLES_FLOOR = 20
+CV_MIN_CHILD_SAMPLES_PCT   = 0.005
  
 # Minimum samples a group must have before we emit a warning.
 # Groups below this threshold produce unreliable fairness metrics.
@@ -51,8 +77,6 @@ _REG_METRICS = {
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
- 
- 
 def _validate_columns(
     df: pd.DataFrame,
     protected_attributes: list[str],
@@ -86,7 +110,6 @@ def _validate_columns(
             )
  
     return valid_protected, valid_targets
- 
  
 def _check_sparse_groups(
     sensitive_features: pd.Series | pd.DataFrame,
@@ -375,6 +398,7 @@ def _build_individual_bundles(
             )
  
     return bundles, all_sparse
+
  
  
 def _build_intersectional_bundles(
@@ -483,7 +507,169 @@ def _build_intersectional_bundles(
             )
  
     return bundles, all_sparse
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+
+def _make_lgbm(task_type: str, n_samples: int) -> LGBMClassifier | LGBMRegressor:
+    """
+    Build a configured but unfitted LightGBM estimator.
  
+    min_child_samples is set adaptively: larger datasets can afford smaller
+    leaves without overfitting, but on small datasets a fixed floor prevents
+    the model from memorising demographic subgroups.
+ 
+    Parameters
+    ----------
+    task_type:
+        "classification" or "regression".
+    n_samples:
+        Total number of training samples — used to set min_child_samples.
+    """
+    min_child = max(
+        CV_MIN_CHILD_SAMPLES_FLOOR,
+        int(CV_MIN_CHILD_SAMPLES_PCT * n_samples),
+    )
+    params = {**LGBM_BASE_PARAMS, "min_child_samples": min_child}
+ 
+    if task_type == "classification":
+        return LGBMClassifier(**params, class_weight="balanced")
+    else:
+        return LGBMRegressor(**params) 
+ 
+def train_bundle(
+    bundle: FairlearnBundle,
+    X: pd.DataFrame,
+    n_splits: int = CV_N_SPLITS,
+) -> BundleResult:
+    """
+    Train a LightGBM model on one FairlearnBundle using cross-validated
+    out-of-fold predictions, then compute MetricFrame on the full dataset.
+    """
+
+    if bundle.skipped:
+        raise ValueError(
+            f"Cannot train a skipped bundle "
+            f"(protected_attr='{bundle.protected_attr}', "
+            f"target_col='{bundle.target_col}'). "
+            f"Reason: {bundle.skip_reason}"
+        )
+ 
+    # ------------------------------------------------------------------
+    # 1. Align X to bundle index
+    # ------------------------------------------------------------------
+    common_idx = X.index.intersection(bundle.y_true.index)
+    if len(common_idx) == 0:
+        raise ValueError(
+            "X and bundle.y_true share no common index values. "
+            "Ensure X was built from csv_data.df[csv_data.encoded_feature_cols] "
+            "using the same CSVData instance as the bundle."
+        )
+ 
+    X_aligned = X.loc[common_idx]
+    y_aligned = bundle.y_true.loc[common_idx]
+ 
+    # ------------------------------------------------------------------
+    # 2. Choose CV strategy
+    # ------------------------------------------------------------------
+    if bundle.task_type == "classification":
+        class_counts = y_aligned.value_counts()
+        min_class_count = int(class_counts.min())
+ 
+        if min_class_count >= n_splits:
+            actual_splits = n_splits
+            cv = StratifiedKFold(
+                n_splits=actual_splits, shuffle=True, random_state=42
+            )
+        elif min_class_count >= 2:
+            actual_splits = min_class_count
+            cv = StratifiedKFold(
+                n_splits=actual_splits, shuffle=True, random_state=42
+            )
+            warnings.warn(
+                f"train_bundle: minority class has only {min_class_count} samples "
+                f"for target='{bundle.target_col}'. Reducing to "
+                f"StratifiedKFold(n_splits={actual_splits}).",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            actual_splits = min(n_splits, len(y_aligned))
+            cv = KFold(n_splits=actual_splits, shuffle=True, random_state=42)
+            warnings.warn(
+                f"train_bundle: a class has only 1 sample for "
+                f"target='{bundle.target_col}'. Falling back to "
+                f"KFold(n_splits={actual_splits}).",
+                UserWarning,
+                stacklevel=2,
+            )
+    else:
+        actual_splits = n_splits
+        cv = KFold(n_splits=actual_splits, shuffle=True, random_state=42)
+ 
+    # ------------------------------------------------------------------
+    # 3. Build estimator — sized to this bundle's dataset
+    # ------------------------------------------------------------------
+    model = _make_lgbm(bundle.task_type, n_samples=len(y_aligned))
+ 
+    # ------------------------------------------------------------------
+    # 4. CV loop — collect out-of-fold predictions
+    # ------------------------------------------------------------------
+    if bundle.task_type == "regression":
+        y_pred_oof = pd.Series(
+            np.full(len(y_aligned), np.nan),
+            index=y_aligned.index,
+            dtype=float,
+        )
+    else:
+        y_pred_oof = pd.Series(
+            index=y_aligned.index,
+            dtype=object,
+        )
+ 
+    cv_split_input = y_aligned if bundle.task_type == "classification" else None
+    last_model = None
+ 
+    for fold, (train_pos, test_pos) in enumerate(
+        cv.split(X_aligned, cv_split_input), start=1
+    ):
+        X_tr = X_aligned.iloc[train_pos]
+        X_te = X_aligned.iloc[test_pos]
+        y_tr = y_aligned.iloc[train_pos]
+ 
+        fold_model = skbase.clone(model)
+        fold_model.fit(X_tr, y_tr)
+ 
+        fold_preds = fold_model.predict(X_te)
+ 
+        y_pred_oof.iloc[test_pos] = fold_preds
+        last_model = fold_model
+ 
+    # ------------------------------------------------------------------
+    # 5. Build MetricFrame on out-of-fold predictions
+    # ------------------------------------------------------------------
+    metrics = (
+        _CLF_METRICS if bundle.task_type == "classification" else _REG_METRICS
+    )
+ 
+    # Align sensitive_features to the same common_idx subset
+    sf_aligned = bundle.sensitive_features.loc[common_idx]
+ 
+    mf = MetricFrame(
+        metrics=metrics,
+        y_true=y_aligned,
+        y_pred=y_pred_oof,
+        sensitive_features=sf_aligned,
+    )
+ 
+    return BundleResult(
+        bundle=bundle,
+        y_pred_oof=y_pred_oof,
+        metric_frame=mf,
+        cv_model=last_model,
+        n_folds=actual_splits,
+    )
  
 # ---------------------------------------------------------------------------
 # MetricFrame runner
@@ -493,8 +679,16 @@ def compute_metric_frames(
     predictions: dict[str, np.ndarray | pd.Series],
 ) -> dict[str, dict[str, MetricFrame]]:
     """
-    Run MetricFrame for every bundle in the dataset using pre-computed
-    model predictions.
+    Run MetricFrame for every bundle using externally supplied predictions.
+ 
+    .. deprecated::
+        Prefer train_bundle() which produces unbiased out-of-fold predictions
+        and builds MetricFrame internally. Use this function only when you have
+        predictions from an external source (e.g. a pre-trained model loaded
+        from disk) and need to evaluate fairness without retraining.
+ 
+        Using non-OOF predictions (e.g. training set predictions) will produce
+        optimistic fairness metrics that do not reflect real-world performance.
  
     Parameters
     ----------
@@ -514,6 +708,14 @@ def compute_metric_frames(
     In intersectional mode, protected_attr is the comma-joined label string
     (e.g. "race, gender, age") — use that as the key.
     """
+    warnings.warn(
+        "compute_metric_frames() is provided for external prediction evaluation "
+        "only. For training and fairness evaluation, use train_bundle() which "
+        "produces unbiased out-of-fold predictions and builds MetricFrame "
+        "internally. Non-OOF predictions produce optimistic fairness metrics.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     results: dict[str, dict[str, MetricFrame]] = {}
  
     for bundle in dataset.bundles:
@@ -597,5 +799,4 @@ def summarise_dataset(dataset: FairlearnDataset) -> dict:
         "total_bundles": len(dataset.bundles),
         "total_sparse_warnings": len(dataset.all_sparse_warnings),
         "bundles": bundle_summaries,
-
     }
