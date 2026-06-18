@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  /* Navy blue-gray theme */
+  --background: #2d3748;
+  --foreground: #e2e8f0;
+  --surface: #1a202c;
+  --surface-elevated: #374151;
+  --outline: #89cff0;
+  --outline-muted: #6bb3d8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-outline: var(--outline);
+  --color-outline-muted: var(--outline-muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Very thin baby blue scrollbar for chat */
+.chat-messages {
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline) var(--surface);
+}
+.chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+.chat-messages::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--outline);
+  border-radius: 4px;
+}
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--outline-muted);
+}
+
+/* Sidebar chat list scrollbar */
+.sidebar-chats {
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline) var(--surface);
+}
+.sidebar-chats::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-chats::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+.sidebar-chats::-webkit-scrollbar-thumb {
+  background: var(--outline);
+  border-radius: 3px;
+}
+.sidebar-chats::-webkit-scrollbar-thumb:hover {
+  background: var(--outline-muted);
+}
