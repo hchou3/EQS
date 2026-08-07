@@ -13,6 +13,7 @@ import tempfile
 import warnings as warnings_module
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .models import (
     ColumnReasoning,
@@ -23,6 +24,7 @@ from .models import (
     LLMClassification,
 )
 from .sessions import session_store
+
 
 from ..ai.csv.csv_processing import CSVData
 from ..config import settings
@@ -79,7 +81,11 @@ def _build_disparity_summary(bias_results: dict) -> list[DisparitySummary]:
     response_model=CSVUploadResponse,
     responses={400: {"description": "Invalid file or unparseable CSV"}},
 )
-async def upload_csv(file: UploadFile = File(...)) -> CSVUploadResponse:
+async def upload_csv(
+    file: UploadFile = File(...),
+    llm_provider: str | None = None,
+    llm_api_key: str | None = None,
+) -> CSVUploadResponse:
     """
     Accept a CSV upload and run the fast preprocessing pipeline:
 
@@ -95,6 +101,17 @@ async def upload_csv(file: UploadFile = File(...)) -> CSVUploadResponse:
     Does NOT train a model — that's a separate, slower step the user
     opts into via POST /csv/{session_id}/train.
     """
+    # --- Extract provider and API key from request ---
+    provider = llm_provider or "gemini"  # Default to Gemini if not provided
+    api_key = llm_api_key or getattr(settings, f"{provider}_api_key", None)
+
+    if not api_key or not api_key.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"LLM API key required for provider '{provider}'. "
+                   f"Please provide it via frontend or set {provider.upper()}_API_KEY in .env",
+        )
+
     # --- Validate file basics before touching disk ---
     if not file.filename or not any(
         file.filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS
@@ -140,18 +157,16 @@ async def upload_csv(file: UploadFile = File(...)) -> CSVUploadResponse:
 
             await csv_data.load_dataset_info()
 
-            if not settings.gemini_api_key.strip():
-                # Should be unreachable in practice — Settings requires this
-                # field at startup — but guards against someone explicitly
-                # setting GEMINI_API_KEY="" rather than omitting it.
+            if not api_key or not api_key.strip():
                 raise HTTPException(
-                    status_code=500,
-                    detail="LLM API key is configured but empty on the server.",
+                    status_code=400,
+                    detail=f"LLM API key required for provider '{provider}'. "
+                           f"Please provide it via frontend or set {provider.upper()}_API_KEY in .env",
                 )
 
             try:
                 await csv_data.identify_columns(
-                    api_key=settings.gemini_api_key,
+                    api_key=api_key,  # Use the already-computed api_key
                     model=settings.csv_classifier_model,
                 )
             except Exception as e:

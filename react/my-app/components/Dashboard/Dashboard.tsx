@@ -15,18 +15,105 @@ export default function Dashboard() {
   const [fileNameByChatId, setFileNameByChatId] = useState<
     Record<string, string>
   >({});
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleUpload = useCallback((file: File) => {
-    const id = crypto.randomUUID();
-    const title = file.name || "New chat";
-    setChats((prev) => [
-      ...prev,
-      { id, title, createdAt: new Date() },
-    ]);
-    setMessagesByChatId((prev) => ({ ...prev, [id]: [] }));
-    setFileNameByChatId((prev) => ({ ...prev, [id]: file.name }));
-    setActiveChatId(id);
-  }, []);
+  const handleUpload = useCallback(
+    async (file: File, llm: string, apiKey?: string) => {
+      const id = crypto.randomUUID();
+      const title = file.name || "New chat";
+
+      // Create chat entry immediately
+      setChats((prev) => [...prev, { id, title, createdAt: new Date() }]);
+      setMessagesByChatId((prev) => ({ ...prev, [id]: [] }));
+      setFileNameByChatId((prev) => ({ ...prev, [id]: file.name }));
+      setActiveChatId(id);
+      setIsUploading(true);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (llm) formData.append("llm_provider", llm);
+        if (apiKey) formData.append("llm_api_key", apiKey);
+
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/csv/upload`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+            },
+            body: formData,
+          },
+        );
+
+        if (!response.ok) {
+          const errorData = await response
+            .json()
+            .catch(() => ({ detail: "Upload failed" }));
+          throw new Error(errorData.detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Add analysis results as system messages
+        const analysisMessages: ChatMessage[] = [
+          {
+            role: "system",
+            content: `📊 **Analysis Complete**\n\n**Equity Score:** ${data.equity_score?.toFixed(2) || "N/A"}\n\n**Dataset:** ${data.dataset_info?.n_rows} rows × ${data.dataset_info?.n_cols} columns`,
+          },
+        ];
+
+        // Add disparity summaries
+        if (data.disparity_summary && data.disparity_summary.length > 0) {
+          data.disparity_summary.forEach((d: any) => {
+            analysisMessages.push({
+              role: "system",
+              content: `⚖️ **Bias Check: ${d.protected_attr} → ${d.target_col}**\n\n- Task: ${d.task_type}\n- Disparity: ${d.disparity?.toFixed(4) || "N/A"}\n- P-value: ${d.p_value?.toFixed(4) || "N/A"}\n${d.error ? `- Error: ${d.error}` : ""}`,
+            });
+          });
+        }
+
+        // Add LLM classification info
+        if (data.llm_classifications) {
+          analysisMessages.push({
+            role: "system",
+            content: `🤖 **LLM Column Classification**\n\n- Protected Attributes: ${data.llm_classifications.protected_attributes?.join(", ") || "none"}\n- Target Columns: ${data.llm_classifications.target_columns?.join(", ") || "none"}\n- Target Types: ${
+              Object.entries(data.llm_classifications.target_column_types || {})
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(", ") || "N/A"
+            }`,
+          });
+        }
+
+        // Add warnings if any
+        if (data.warnings && data.warnings.length > 0) {
+          data.warnings.forEach((w: string) => {
+            analysisMessages.push({
+              role: "system",
+              content: `⚠️ **Warning:** ${w}`,
+            });
+          });
+        }
+
+        setMessagesByChatId((prev) => ({ ...prev, [id]: analysisMessages }));
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        setMessagesByChatId((prev) => ({
+          ...prev,
+          [id]: [
+            {
+              role: "system",
+              content: `❌ **Analysis Failed:** ${errorMessage}`,
+            },
+          ],
+        }));
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [],
+  );
 
   const handleNewChat = useCallback(() => {
     setActiveChatId(null);
@@ -38,14 +125,20 @@ export default function Dashboard() {
       setMessagesByChatId((prev) => ({
         ...prev,
         [activeChatId]:
-          typeof updater === "function" ? updater(prev[activeChatId] ?? []) : updater,
+          typeof updater === "function"
+            ? updater(prev[activeChatId] ?? [])
+            : updater,
       }));
     },
-    [activeChatId]
+    [activeChatId],
   );
 
-  const activeMessages = activeChatId ? messagesByChatId[activeChatId] ?? [] : [];
-  const activeFileName = activeChatId ? fileNameByChatId[activeChatId] : undefined;
+  const activeMessages = activeChatId
+    ? (messagesByChatId[activeChatId] ?? [])
+    : [];
+  const activeFileName = activeChatId
+    ? fileNameByChatId[activeChatId]
+    : undefined;
 
   return (
     <div className="flex min-h-0 flex-1">

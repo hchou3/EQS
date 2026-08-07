@@ -39,7 +39,7 @@ export default function Chatbox({
       setMessages((prev) => [...prev, userMessage]);
       setInput("");
       setIsLoading(true);
-
+      console.log("Messages:", messages);
       try {
         // ——— API_CALL: triggered here ———
         // sendMessageApi() calls the chat backend (see lib/api/chat.ts).
@@ -64,7 +64,7 @@ export default function Chatbox({
         setIsLoading(false);
       }
     },
-    [input, isLoading, setMessages, conversationId]
+    [input, isLoading, setMessages, conversationId],
   );
 
   return (
@@ -96,15 +96,10 @@ export default function Chatbox({
           )}
           {messages.map((msg) => (
             <div
-              key={msg.id}
+              key={`msg-${msg.id}-${Date.now()}`} // 🔑 New unique key format
               className={`rounded-lg px-3 py-2 text-sm ${
-                msg.role === "user"
-                  ? "ml-8 bg-[var(--surface-elevated)]"
-                  : "mr-8 bg-[var(--outline)]/20"
+                msg.role === "user" ? "bg-blue-100" : "bg-gray-100"
               }`}
-              style={{
-                border: "1px solid var(--outline)",
-              }}
             >
               <span className="font-medium text-[var(--outline)]">
                 {msg.role === "user" ? "You" : "Assistant"}:

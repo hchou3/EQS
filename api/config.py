@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     # with a clear pydantic ValidationError instead of a vague runtime
     # error the first time a route tries to use it.
     gemini_api_key: str | None = None
- 
+    openai_api_key: str | None = None
+    groq_api_key: str | None = None
+
     csv_classifier_model: str = "gemini-2.0-flash"
  
     # --- App-level config ---
