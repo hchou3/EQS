@@ -752,6 +752,7 @@ class CSVData:
         self,
         api_key: str,
         model: str,
+        provider: str = "gemini",
         sample_size: int = 20,
     ) -> None:
         """
@@ -771,7 +772,7 @@ class CSVData:
             await self.load_dataset_info(sample_size)
 
         prompt = create_csv_prompt(self.dataset_info)
-        response = await llm_call(prompt, api_key, model)
+        response = await llm_call(prompt, api_key, model, provider)
         result = parse_llm_response(response)
 
         self.protected_attributes = result.get("protected_attributes") or []

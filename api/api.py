@@ -14,10 +14,11 @@ app = FastAPI(title="Bias Detection API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # ⬅️ Update to match your React dev server
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Support both localhost formats
     allow_credentials=True,
-    allow_methods=["POST"],  # Add other methods if needed
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],  # Added GET for provider-config
     allow_headers=["*"],
+    expose_headers=["*"],  # Ensure responses can include necessary headers
 )
 
 app.include_router(csv_upload_router)
@@ -34,26 +35,21 @@ async def health() -> dict:
 
 @app.get("/provider-config")
 async def provider_config() -> dict:
-    """
-    Returns which LLM providers have API keys configured on the backend.
-    Used by the frontend to decide whether to prompt the user for an API key.
-    Exposes only boolean flags—never the actual secrets.
-    """
-    return {
-        "providers": {
-            "gemini": bool(getattr(settings, "gemini_api_key", None)),
-            "groq": bool(getattr(settings, "groq_api_key", None)),
-            "openai": bool(getattr(settings, "openai_api_key", None)),
+    """Debug endpoint to show loaded keys"""
+    debug_info = {
+        "key_checks": {
+            "gemini": bool(settings.gemini_api_key),
+            "groq": bool(settings.groq_api_key),
+            "openai": bool(settings.openai_api_key)
         },
-        "debug": {
-            "gemini_api_key": getattr(settings, "gemini_api_key", None),
-            "groq_api_key": getattr(settings, "groq_api_key", None),
-            "openai_api_key": getattr(settings, "openai_api_key", None),
-            "working_dir": os.getcwd(),
-            "env_file_exists": os.path.exists(".env"),
-        }
+        "working_dir": os.getcwd(),
+        "env_file": ".env",
+        "env_exists": os.path.exists(".env"),
+        # NEW: Log actual .env content (first 50 chars)
+        "env_content": open(".env").read()[:50] if os.path.exists(".env") else "NOT FOUND"
     }
-
+    print("DEBUG: provider-config endpoint called with keys:", debug_info["key_checks"])
+    return debug_info
 
 @app.get("/debug/settings")
 async def debug_settings() -> dict:

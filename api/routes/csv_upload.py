@@ -35,7 +35,7 @@ ALLOWED_EXTENSIONS = {".csv"}
 
 
 
-def _build_disparity_summary(bias_results: dict) -> list[DisparitySummary]:
+def _build_disparity_summary(bias_results: dict) -> List[DisparitySummary]:
     """
     Flatten the nested bias_results dict into a list the frontend can
     iterate directly without knowing the nested protected_attr -> target_col
@@ -170,7 +170,7 @@ async def upload_csv(
             # Determine which model to use for the selected provider
             PROVIDER_MODEL_MAP = {
                 "gemini": "gemini-2.0-flash",
-                "groq": "groq/llama3",          # adjust if you use a different Groq model
+                "groq": "groq/llama-3.3-70b-versatile",
                 "openai": "gpt-4",
                 # add more as needed
             }
@@ -180,6 +180,7 @@ async def upload_csv(
                 await csv_data.identify_columns(
                     api_key=api_key,
                     model=model_name,
+                    provider=provider,
                 )
             except Exception as e:
                 raise HTTPException(
