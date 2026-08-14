@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import CircularDotsLoader from "@/components/CircularDotsLoader";
 import type { ChatMessage } from "@/lib/api";
 import { FileUpload } from "@/components/FileUpload";
 import { Sidebar, type ChatItem } from "@/components/Sidebar";
 import { Chatbox } from "@/components/Chatbox";
+import AnalysisTabs from "@/components/AnalysisTabs/AnalysisTabs";
+import type { CSVUploadResponse } from "@/lib/api/types";
 
 export default function Dashboard() {
   const [chats, setChats] = useState<ChatItem[]>([]);
@@ -16,6 +19,8 @@ export default function Dashboard() {
     Record<string, string>
   >({});
   const [isUploading, setIsUploading] = useState(false);
+  const [analysisResult, setAnalysisResult] =
+    useState<CSVUploadResponse | null>(null);
 
   const handleUpload = useCallback(
     async (file: File, llm: string, apiKey?: string) => {
@@ -28,6 +33,8 @@ export default function Dashboard() {
       setFileNameByChatId((prev) => ({ ...prev, [id]: file.name }));
       setActiveChatId(id);
       setIsUploading(true);
+      // Clear any previous analysis results
+      setAnalysisResult(null);
 
       try {
         const formData = new FormData();
@@ -38,7 +45,14 @@ export default function Dashboard() {
         if (provider) formData.append("llm_provider", provider);
 
         // DEBUG: Log what we're actually sending
-        console.log("Original llm:", llm, "Normalized provider:", provider, "Has apiKey:", !!apiKey);
+        console.log(
+          "Original llm:",
+          llm,
+          "Normalized provider:",
+          provider,
+          "Has apiKey:",
+          !!apiKey,
+        );
 
         if (apiKey) formData.append("llm_api_key", apiKey);
 
@@ -62,47 +76,9 @@ export default function Dashboard() {
 
         const data = await response.json();
 
-        // Add analysis results as system messages
-        const analysisMessages: ChatMessage[] = [
-          {
-            role: "system",
-            content: `📊 **Analysis Complete**\n\n**Equity Score:** ${data.equity_score?.toFixed(2) || "N/A"}\n\n**Dataset:** ${data.dataset_info?.n_rows} rows × ${data.dataset_info?.n_cols} columns`,
-          },
-        ];
-
-        // Add disparity summaries
-        if (data.disparity_summary && data.disparity_summary.length > 0) {
-          data.disparity_summary.forEach((d: any) => {
-            analysisMessages.push({
-              role: "system",
-              content: `⚖️ **Bias Check: ${d.protected_attr} → ${d.target_col}**\n\n- Task: ${d.task_type}\n- Disparity: ${d.disparity?.toFixed(4) || "N/A"}\n- P-value: ${d.p_value?.toFixed(4) || "N/A"}\n${d.error ? `- Error: ${d.error}` : ""}`,
-            });
-          });
-        }
-
-        // Add LLM classification info
-        if (data.llm_classifications) {
-          analysisMessages.push({
-            role: "system",
-            content: `🤖 **LLM Column Classification**\n\n- Protected Attributes: ${data.llm_classifications.protected_attributes?.join(", ") || "none"}\n- Target Columns: ${data.llm_classifications.target_columns?.join(", ") || "none"}\n- Target Types: ${
-              Object.entries(data.llm_classifications.target_column_types || {})
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(", ") || "N/A"
-            }`,
-          });
-        }
-
-        // Add warnings if any
-        if (data.warnings && data.warnings.length > 0) {
-          data.warnings.forEach((w: string) => {
-            analysisMessages.push({
-              role: "system",
-              content: `⚠️ **Warning:** ${w}`,
-            });
-          });
-        }
-
-        setMessagesByChatId((prev) => ({ ...prev, [id]: analysisMessages }));
+        // Store analysis results in state for the dashboard component
+        // NOTE: We store analysis result separately from chat messages to avoid polluting the chat interface
+        setAnalysisResult(data);
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
@@ -155,19 +131,48 @@ export default function Dashboard() {
         onSelectChat={setActiveChatId}
         onNewChat={handleNewChat}
       />
-      <main className="flex min-w-0 flex-1 flex-col items-center justify-start overflow-auto p-6">
-        {activeChatId === null ? (
-          <div className="w-full max-w-2xl">
+      <main className="flex min-w-0 flex-1 overflow-auto">
+        {isUploading ? (
+          <div className="w-full max-w-2xl mx-auto py-12">
+            <CircularDotsLoader className="mx-auto" />
+          </div>
+        ) : analysisResult ? (
+          <div className="w-full mx-auto px-4">
+            <div className="flex gap-6">
+              <div className="flex-1 min-w-0">
+                <Chatbox
+                  messages={activeMessages}
+                  setMessages={setMessagesForActive}
+                  conversationId={activeChatId}
+                  fileName={activeFileName}
+                />
+              </div>
+              <div className="w-105 min-w-0">
+                <AnalysisTabs analysisResult={analysisResult} />
+              </div>
+            </div>
+          </div>
+        ) : activeChatId === null ? (
+          <div className="w-full max-w-2xl mx-auto">
             <FileUpload onUpload={handleUpload} />
           </div>
         ) : (
-          <div className="w-full max-w-2xl">
-            <Chatbox
-              messages={activeMessages}
-              setMessages={setMessagesForActive}
-              conversationId={activeChatId}
-              fileName={activeFileName}
-            />
+          <div className="w-full mx-auto px-4">
+            <div className="flex gap-6">
+              <div className="flex-1 min-w-0">
+                <Chatbox
+                  messages={activeMessages}
+                  setMessages={setMessagesForActive}
+                  conversationId={activeChatId}
+                  fileName={activeFileName}
+                />
+              </div>
+              <div className="w-105 min-w-0">
+                <p className="text-center text-gray-500 py-8 bg-white shadow-md rounded-lg p-4">
+                  No analysis results yet. Upload a file to begin analysis.
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </main>

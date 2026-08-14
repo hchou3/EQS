@@ -87,7 +87,7 @@ export default function Chatbox({
         </h2>
       </div>
 
-      <div className="flex min-h-[280px] max-h-[420px] flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden">
         <div className="chat-messages flex-1 space-y-3 overflow-y-auto p-4 min-h-0">
           {messages.length === 0 && (
             <p className="text-center text-sm text-[var(--outline-muted)]">
