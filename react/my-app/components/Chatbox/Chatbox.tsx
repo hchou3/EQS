@@ -98,7 +98,7 @@ export default function Chatbox({
             <div
               key={`msg-${msg.id}-${Date.now()}`} // 🔑 New unique key format
               className={`rounded-lg px-3 py-2 text-sm ${
-                msg.role === "user" ? "bg-blue-100" : "bg-gray-100"
+                msg.role === "user" ? "bg-blue-200" : "bg-gray-300"
               }`}
             >
               <span className="font-medium text-[var(--outline)]">

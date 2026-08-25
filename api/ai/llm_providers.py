@@ -7,10 +7,14 @@ and API-specific call logic.
 """
 
 from abc import ABC, abstractmethod
+import json
+from pyexpat.errors import messages
 from typing import Literal
 import asyncio
 
-ProviderType = Literal["gemini", "groq", "openai"]
+from fastapi import requests
+
+ProviderType = Literal["gemini", "groq", "openai", "openrouter"]  # Added "openrouter" for OpenRouter support
 
 
 class LLMProvider(ABC):
@@ -28,6 +32,7 @@ class LLMProvider(ABC):
             "gemini": GeminiProvider(),
             "groq": GroqProvider(),
             "openai": OpenAIProvider(),
+            "openrouter": GroqProvider(),
         }
         if provider not in providers:
             raise ValueError(f"Unknown provider: {provider}. Available: {list(providers.keys())}")
@@ -64,19 +69,26 @@ class GroqProvider(LLMProvider):
             raise ValueError("API key not provided")
 
         # Groq uses OpenAI-compatible API
-        client = openai.OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
+        response = requests.post(
+        url="https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps({
+            "model": "qwen/qwen3.8-27b",
+            "messages": [
+                {
+                "role": "user",
+                "content": prompt
+                }
+            ],
+            "reasoning": {"enabled": True}
+        })
         )
-        # Remove "groq/" prefix if present
-        model_name = model.replace("groq/", "")
 
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        return response.choices[0].message.content
+        response = response.json()
+        return response['choices'][0]['message']
 
 
 class OpenAIProvider(LLMProvider):

@@ -20,7 +20,7 @@ const AnalysisResults = forwardRef<
   const [show, setShow] = useState(false);
 
   useImperativeHandle(ref, () => ({
-    focus: setShow ? () => setShow(true) : undefined,
+    focus: () => setShow(true),
   }));
 
   return (

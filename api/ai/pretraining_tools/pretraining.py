@@ -27,11 +27,12 @@ def debug_log(message: str):
 # -----------------------------------------------------------------------------
 PROVIDER_MODELS = {
     "gemini": ["gemini-2.0-flash", "gemini-2.0-pro"],
-    "groq": ["groq/llama-3.3-70b-versatile"],
+    "groq": ["groq/qwen/qwen3.8-27b"],
     "openai": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+    "openrouter": ["openrouter/qwen/qwen3.8-27b"]
 }
 
-ProviderType = Literal["gemini", "groq", "openai"]
+ProviderType = Literal["gemini", "groq", "openai", "openrouter"]
 
 # -----------------------------------------------------------------------------
 # Response parsing (sync - no I/O)
@@ -85,37 +86,31 @@ def _llm_call_gemini(prompt: str, api_key: str, model: str) -> str:
         raise
 
 
-def _llm_call_groq(prompt: str, api_key: str, model: str) -> str:
-    """Synchronous Groq API call (OpenAI-compatible)."""
-    debug_log(f"GROQ CALL - model={model}, api_key_present={bool(api_key)}")
-    debug_log(f"GROQ PROMPT (first 300 chars): {prompt[:300]}")
-    if not openai:
-        debug_log("ERROR: openai package not installed")
-        raise ImportError("openai package not installed. Run: pip install openai")
+def _llm_call_openrouter(prompt: str, api_key: str, model: str) -> str:
+    """Synchronous OpenRouter API call."""
+    import httpx
+
     if not api_key:
-        debug_log("ERROR: API key not provided")
         raise ValueError("API key not provided")
 
-    # Groq uses OpenAI-compatible API
     try:
-        client = openai.OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
+        response = httpx.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "reasoning": {"enabled": True}
+            },
+            timeout=30.0
         )
-        # Extract model name (remove "groq/" prefix if present)
-        model_name = model.replace("groq/", "")
-        debug_log(f"GROQ Creating completion with model={model_name}")
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        debug_log(f"GROQ Response received, length={len(response.choices[0].message.content)} chars")
-        debug_log(f"GROQ Response (first 300 chars): {response.choices[0].message.content[:300]}")
-        return response.choices[0].message.content
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']
     except Exception as e:
-        debug_log(f"GROQ EXCEPTION: {str(e)}")
-        debug_log(f"GROQ EXCEPTION TRACEBACK: {traceback.format_exc()}")
+        debug_log(f"OPENROUTER EXCEPTION: {str(e)}")
         raise
 
 
@@ -143,11 +138,13 @@ def _llm_call_sync(prompt: str, api_key: str, model: str, provider: str) -> str:
     if provider == "gemini":
         return _llm_call_gemini(prompt, api_key, model)
     elif provider == "groq":
-        return _llm_call_groq(prompt, api_key, model)
+        return _llm_call_openrouter(prompt, api_key, model)
     elif provider == "openai":
         return _llm_call_openai(prompt, api_key, model)
+    elif provider == "openrouter":
+        return _llm_call_openrouter(prompt, api_key, model)
     else:
-        error_msg = f"Unsupported provider: {provider}. Supported: gemini, groq, openai"
+        error_msg = f"Unsupported provider: {provider}. Supported: gemini, groq, openai, openrouter"
         debug_log(f"ERROR: {error_msg}")
         raise ValueError(error_msg)
 

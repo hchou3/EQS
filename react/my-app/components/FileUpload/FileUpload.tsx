@@ -13,7 +13,7 @@ const LLM_TO_PROVIDER_MAP: Record<string, string> = {
   "gemini-2.0-flash": "gemini",
   "gemini-2.0-pro": "gemini",
   "openai/gpt-4": "openai",
-  "groq/llama-3.3-70b-versatile": "groq",
+  "groq/qwen/qwen3.8-27b": "groq",
 };
 
 // Map dropdown values to display labels
@@ -21,7 +21,7 @@ const LLM_LABELS: Record<string, string> = {
   "gemini-2.0-flash": "Gemini 2.0 Flash",
   "gemini-2.0-pro": "Gemini 2.0 Pro",
   "openai/gpt-4": "OpenAI GPT-4",
-  "groq/llama-3.3-70b-versatile": "Groq Llama3 3.3 Versatile",
+  "groq/qwen/qwen3.8-27b": "Qwen 3.8-27B (Groq)",
 };
 
 export default function FileUpload({
@@ -43,8 +43,8 @@ export default function FileUpload({
     { value: "gemini-2.0-pro", label: "Gemini 2.0 Pro" },
     { value: "openai/gpt-4", label: "OpenAI GPT-4" },
     {
-      value: "groq/llama-3.3-70b-versatile",
-      label: "Groq Llama3 3.3 Versatile",
+      value: "groq/qwen/qwen3.8-27b",
+      label: "Qwen 3.8-27B (Groq)",
     },
   ];
 

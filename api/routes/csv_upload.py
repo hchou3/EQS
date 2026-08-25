@@ -170,7 +170,7 @@ async def upload_csv(
             # Determine which model to use for the selected provider
             PROVIDER_MODEL_MAP = {
                 "gemini": "gemini-2.0-flash",
-                "groq": "groq/llama-3.3-70b-versatile",
+                "groq": "qwen/qwen3.8-27b",
                 "openai": "gpt-4",
                 # add more as needed
             }

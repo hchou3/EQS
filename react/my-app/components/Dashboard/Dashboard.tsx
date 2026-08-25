@@ -16,7 +16,7 @@ export default function Dashboard() {
     Record<string, ChatMessage[]>
   >({});
   const [fileNameByChatId, setFileNameByChatId] = useState<
-    Record<string, string>
+    Record<string, string | undefined>
   >({});
   const [isUploading, setIsUploading] = useState(false);
   const [analysisResult, setAnalysisResult] =
@@ -86,8 +86,10 @@ export default function Dashboard() {
           ...prev,
           [id]: [
             {
-              role: "system",
+              id: crypto.randomUUID(),
+              role: "assistant",
               content: `❌ **Analysis Failed:** ${errorMessage}`,
+              timestamp: new Date().toISOString(),
             },
           ],
         }));
@@ -105,13 +107,11 @@ export default function Dashboard() {
   const setMessagesForActive = useCallback(
     (updater: React.SetStateAction<ChatMessage[]>) => {
       if (activeChatId === null) return;
-      setMessagesByChatId((prev) => ({
-        ...prev,
-        [activeChatId]:
-          typeof updater === "function"
-            ? updater(prev[activeChatId] ?? [])
-            : updater,
-      }));
+      setMessagesByChatId((prev) => {
+        const current = prev[activeChatId] ?? [];
+        const updated = typeof updater === "function" ? updater(current) : updater;
+        return { ...prev, [activeChatId]: updated };
+      });
     },
     [activeChatId],
   );
@@ -120,8 +120,9 @@ export default function Dashboard() {
     ? (messagesByChatId[activeChatId] ?? [])
     : [];
   const activeFileName = activeChatId
-    ? fileNameByChatId[activeChatId]
+    ? fileNameByChatId[activeChatId] ?? undefined
     : undefined;
+  const activeConversationId = activeChatId ?? undefined;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -134,7 +135,7 @@ export default function Dashboard() {
       <main className="flex min-w-0 flex-1 overflow-auto">
         {isUploading ? (
           <div className="w-full max-w-2xl mx-auto py-12">
-            <CircularDotsLoader className="mx-auto" />
+            <CircularDotsLoader />
           </div>
         ) : analysisResult ? (
           <div className="w-full mx-auto px-4">
@@ -143,7 +144,7 @@ export default function Dashboard() {
                 <Chatbox
                   messages={activeMessages}
                   setMessages={setMessagesForActive}
-                  conversationId={activeChatId}
+                  conversationId={activeConversationId}
                   fileName={activeFileName}
                 />
               </div>
@@ -163,7 +164,7 @@ export default function Dashboard() {
                 <Chatbox
                   messages={activeMessages}
                   setMessages={setMessagesForActive}
-                  conversationId={activeChatId}
+                  conversationId={activeConversationId}
                   fileName={activeFileName}
                 />
               </div>
